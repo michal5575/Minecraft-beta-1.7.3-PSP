@@ -1,0 +1,5 @@
+# Local builds. Textures and sounds are converted from a local
+# Minecraft jar at build time and are not part of this source.
+build*/
+dist/
+Minecraft-Beta-1.7.3-showcase.mp4
