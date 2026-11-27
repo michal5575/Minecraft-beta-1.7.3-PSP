@@ -1198,6 +1198,19 @@ int main(int argc, char** argv) {
                   g->thunder == 1.0f && std::abs(g->rainTime - rainTime) <= 1,
               "weather survives saving");
         g->clearWeather();
+        for (Entity& e : g->ents) e.type = ENT_NONE;
+        g->sleeping = false;
+        for (int i = 0; i < 20; ++i) g->stream(3, 0.5);
+        g->world.time = 18000;
+        for (int i = 0; i < 400; ++i) {
+            g->tick();
+            if (i % 8 == 0) g->stream(3, 0.05);
+        }
+        int nightMobs = 0;
+        for (const Entity& e : g->ents)
+            if (entityIsHostile(e.type) && !e.dead) ++nightMobs;
+        std::printf("night mobs: %d sky %d\n", nightMobs, g->world.skySubtracted);
+        check(nightMobs > 0, "mobs spawn at night");
     }
 
     g->closeWorld();
@@ -1268,6 +1281,13 @@ int main(int argc, char** argv) {
     } else {
         std::printf("(sounds.pak not found, skipping audio checks)\n");
     }
+
+    bool hasRedstone = false, hasFlint = false;
+    for (int i = 0; i < g_creativeItemCount; ++i) {
+        if (g_creativeItems[i].id == I_REDSTONE && g_creativeItems[i].count > 1) hasRedstone = true;
+        if (g_creativeItems[i].id == I_FLINT_AND_STEEL) hasFlint = true;
+    }
+    check(hasRedstone && hasFlint, "creative has redstone and flint and steel");
 
     std::printf("%s\n", fails ? "SOME CHECKS FAILED" : "all checks passed");
     return fails ? 1 : 0;

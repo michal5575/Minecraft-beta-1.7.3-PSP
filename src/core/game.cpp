@@ -445,8 +445,9 @@ bool Game::createWorld(const char* dir, int64_t seed, int m) {
     player.setPosition(0.5f, 100.0f, 0.5f);
     world.skySubtracted = computeSkySubtracted();
     if (mode == MODE_CREATIVE) {
-        const uint16_t HOTBAR[9] = {STONE, COBBLESTONE, DIRT, PLANKS, LOG, GLASS, BRICK, TORCH, SAND};
-        for (int i = 0; i < 9; ++i) inv.main[i] = ItemStack(HOTBAR[i], 1);
+        const uint16_t HOTBAR[9] = {STONE, COBBLESTONE, DIRT, PLANKS, TORCH, I_REDSTONE, I_FLINT_AND_STEEL, LOG,
+                                    GLASS};
+        for (int i = 0; i < 9; ++i) inv.main[i] = ItemStack(HOTBAR[i], itemMaxStack(HOTBAR[i]));
     }
     return true;
 }
@@ -3865,7 +3866,7 @@ bool Game::canSpawnAt(int x, int y, int z) const {
     return !blockIsSolid(a) && !blockIsLiquid(a) && !blockIsSolid(b) && !blockIsLiquid(b);
 }
 
-// SpawnerAnimals.performSpawning, simplified to a few attempts per tick around the player.
+// SpawnerAnimals.performSpawning. Hostile mobs are tried across the loaded chunks every tick.
 void Game::spawnMobs() {
     int hostile = 0, animals = 0, squids = 0;
     for (const Entity& e : ents) {
@@ -3884,59 +3885,80 @@ void Game::spawnMobs() {
     };
     if (dimension < 0) {
         // BiomeGenHell: ghasts and zombie pigmen (EntityLiving.getCanSpawnHere, no light check); nothing else.
-        if (hostile >= 10 || (world.time & 1) != 0) return;
-        int x, y, z;
-        if (!randomSpot(x, y, z) || !canSpawnAt(x, y, z)) return;
-        uint8_t type = rand.nextInt(2) ? ENT_PIGZOMBIE : ENT_GHAST;
-        int group = 1 + rand.nextInt(3);
-        for (int i = 0; i < group && hostile < 10; ++i) {
-            bool ok = canSpawnAt(x, y, z) && (type != ENT_GHAST || rand.nextInt(20) == 0);
-            if (ok) {
-                Body probe;
-                probe.width = MOBS[type].width;
-                probe.height = MOBS[type].height;
-                probe.setPosition(x + 0.5f, (float)y, z + 0.5f);
-                AABB b = probe.box();
-                ok = !probe.collides(world, b) && !(!dead && b.intersects(player.box()));
-                for (int bx = ifloor(b.x0); ok && bx <= ifloor(b.x1); ++bx)
-                    for (int by = ifloor(b.y0); ok && by <= ifloor(b.y1); ++by)
-                        for (int bz = ifloor(b.z0); ok && bz <= ifloor(b.z1); ++bz)
-                            if (blockIsLiquid(world.get(bx, by, bz))) ok = false;
-                for (const Entity& o : ents)
-                    if (ok && entityIsMob(o.type) && o.health > 0 && b.intersects(o.box())) ok = false;
-            }
-            if (ok) {
-                Entity* e = spawn(type, x + 0.5f, (float)y, z + 0.5f);
-                if (!e) break;
-                e->yaw = e->prevYaw = rand.nextFloat() * 360.0f;
-                ++hostile;
-            }
-            x += rand.nextInt(6) - rand.nextInt(6);
-            z += rand.nextInt(6) - rand.nextInt(6);
-        }
-        return;
-    }
-    if (hostile < 10 && (world.time & 1) == 0) {
-        int x, y, z;
-        if (randomSpot(x, y, z) && canSpawnAt(x, y, z)) {
-            static const uint8_t TYPES[5] = {ENT_SPIDER, ENT_ZOMBIE, ENT_SKELETON, ENT_CREEPER, ENT_SLIME};
-            uint8_t type = TYPES[rand.nextInt(5)];
+        for (int attempt = 0; attempt < 8 && hostile < 10; ++attempt) {
+            int x, y, z;
+            if (!randomSpot(x, y, z) || !canSpawnAt(x, y, z)) continue;
+            uint8_t type = rand.nextInt(2) ? ENT_PIGZOMBIE : ENT_GHAST;
             int group = 1 + rand.nextInt(3);
             for (int i = 0; i < group && hostile < 10; ++i) {
-                bool ok = canSpawnAt(x, y, z);
-                // EntitySlime.getCanSpawnHere ignores light: slime chunks below y 16
-                if (ok && type == ENT_SLIME)
-                    ok = rand.nextInt(10) == 0 && slimeChunk(x >> 4, z >> 4) && y < 16;
-                else if (ok)
-                    ok = monsterLightOk(x, y, z);
+                bool ok = canSpawnAt(x, y, z) && (type != ENT_GHAST || rand.nextInt(20) == 0);
+                if (ok) {
+                    Body probe;
+                    probe.width = MOBS[type].width;
+                    probe.height = MOBS[type].height;
+                    probe.setPosition(x + 0.5f, (float)y, z + 0.5f);
+                    AABB b = probe.box();
+                    ok = !probe.collides(world, b) && !(!dead && b.intersects(player.box()));
+                    for (int bx = ifloor(b.x0); ok && bx <= ifloor(b.x1); ++bx)
+                        for (int by = ifloor(b.y0); ok && by <= ifloor(b.y1); ++by)
+                            for (int bz = ifloor(b.z0); ok && bz <= ifloor(b.z1); ++bz)
+                                if (blockIsLiquid(world.get(bx, by, bz))) ok = false;
+                    for (const Entity& o : ents)
+                        if (ok && entityIsMob(o.type) && o.health > 0 && b.intersects(o.box())) ok = false;
+                }
                 if (ok) {
                     Entity* e = spawn(type, x + 0.5f, (float)y, z + 0.5f);
                     if (!e) break;
-                    e->yaw = rand.nextFloat() * 360.0f;
+                    e->yaw = e->prevYaw = rand.nextFloat() * 360.0f;
                     ++hostile;
                 }
                 x += rand.nextInt(6) - rand.nextInt(6);
                 z += rand.nextInt(6) - rand.nextInt(6);
+            }
+        }
+        return;
+    }
+    // SpawnerAnimals walks the chunks inside an 8-chunk square every tick. One random column
+    // every other tick almost never lands on a dark floor, so nights stayed empty.
+    if (hostile < 10) {
+        int pcx = ifloor(player.x) >> 4, pcz = ifloor(player.z) >> 4;
+        static const uint8_t TYPES[5] = {ENT_SPIDER, ENT_ZOMBIE, ENT_SKELETON, ENT_CREEPER, ENT_SLIME};
+        for (int n = 0; n < 48 && hostile < 10; ++n) {
+            Chunk* c = world.slot(rand.nextInt(World::RING), rand.nextInt(World::RING));
+            if (!c || !(c->flags & CHUNK_LIT)) continue;
+            int dcx = c->cx - pcx, dcz = c->cz - pcz;
+            if (dcx > 8 || dcx < -8 || dcz > 8 || dcz < -8) continue;
+            int x = c->cx * 16 + rand.nextInt(16);
+            int z = c->cz * 16 + rand.nextInt(16);
+            int y = rand.nextInt(128);
+            uint8_t here = world.get(x, y, z);
+            if (blockIsNormalCube(here) || blockIsLiquid(here)) continue;
+            uint8_t type = TYPES[rand.nextInt(5)];
+            int pack = 0;
+            for (int g = 0; g < 3 && hostile < 10 && pack < 4; ++g) {
+                int sx = x, sy = y, sz = z;
+                for (int k = 0; k < 4 && hostile < 10 && pack < 4; ++k) {
+                    sx += rand.nextInt(6) - rand.nextInt(6);
+                    sy += rand.nextInt(1) - rand.nextInt(1);
+                    sz += rand.nextInt(6) - rand.nextInt(6);
+                    if (!canSpawnAt(sx, sy, sz)) continue;
+                    // EntitySlime.getCanSpawnHere ignores light: slime chunks below y 16
+                    if (type == ENT_SLIME) {
+                        if (rand.nextInt(10) != 0 || !slimeChunk(sx >> 4, sz >> 4) || sy >= 16) continue;
+                    } else if (!monsterLightOk(sx, sy, sz)) {
+                        continue;
+                    }
+                    float px = sx + 0.5f, pz = sz + 0.5f;
+                    float dx = px - player.x, dy = (float)sy - player.y, dz = pz - player.z;
+                    if (dx * dx + dy * dy + dz * dz < 24.0f * 24.0f) continue;
+                    float ox = px - (spawnX + 0.5f), oy = (float)sy - (float)spawnY, oz = pz - (spawnZ + 0.5f);
+                    if (ox * ox + oy * oy + oz * oz < 24.0f * 24.0f) continue;
+                    Entity* e = spawn(type, px, (float)sy, pz);
+                    if (!e) return;
+                    e->yaw = e->prevYaw = rand.nextFloat() * 360.0f;
+                    ++hostile;
+                    ++pack;
+                }
             }
         }
     }

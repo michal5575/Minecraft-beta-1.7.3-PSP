@@ -1714,7 +1714,8 @@ void pickerFrame(double now, double dt) {
     if (g_in.hit(PSP_CTRL_RTRIGGER)) selectSlot(g_game.inv.selected + 1);
     if (g_in.hit(PSP_CTRL_CROSS)) {
         ItemStack s = g_creativeItems[g_pickerCursor];
-        s.count = 1;
+        int stack = itemMaxStack(s.id);
+        s.count = (uint8_t)(stack > 0 ? stack : 1);
         g_game.inv.held() = s;
         g_itemNameTimer = 2.0;
         g_state = State::Playing;
